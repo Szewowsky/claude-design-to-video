@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node (if anyone adds tooling later)
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Skill build artifacts
+*.skill.tmp/
+build/
+
+# Example renders (large files — keep outside repo)
+*.mp4
+*.mov
+*.webm
+
+# Local testing
+test-bundles/
+test-renders/
