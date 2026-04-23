@@ -1,5 +1,7 @@
 # claude-design-to-video (macOS + Linux)
 
+![Octopus Animator](assets/promo-banner.png)
+
 > **Claude Design HTML export → MP4 video** — deterministic frame-by-frame rendering via timecut.
 
 Claude Design (Anthropic Labs) exports animated prototypes as **standalone HTML** (React + Babel + JSX scenes). This skill converts that export to an MP4 video without frame drops, glitches, or quality loss — ready for YouTube, Instagram, LinkedIn, or anywhere else.
@@ -64,7 +66,7 @@ First run installs `timecut@0.3.3` (pinned) — cached in `~/.cache/claude-desig
 ### Option A — manual copy (easiest)
 
 ```bash
-git clone https://github.com/YOUR_USER/claude-design-to-video.git
+git clone https://github.com/Szewowsky/claude-design-to-video.git
 cp -R claude-design-to-video/skill ~/.claude/skills/claude-design-to-video
 ```
 
@@ -72,7 +74,7 @@ Restart Claude Code. The skill appears as `/claude-design-to-video`.
 
 ### Option B — `.skill` package
 
-Download `claude-design-to-video.skill` from the [releases page](https://github.com/YOUR_USER/claude-design-to-video/releases), then install via Claude Code's skill installer.
+Download `claude-design-to-video.skill` from the [releases page](https://github.com/Szewowsky/claude-design-to-video/releases), then install via Claude Code's skill installer.
 
 ---
 
