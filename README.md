@@ -1,7 +1,5 @@
 # claude-design-to-video (macOS + Linux)
 
-![Octopus Animator](assets/promo-banner.png)
-
 > **Claude Design HTML export → MP4 video** — deterministic frame-by-frame rendering via timecut.
 
 Claude Design (Anthropic Labs) exports animated prototypes as **standalone HTML** (React + Babel + JSX scenes). This skill converts that export to an MP4 video without frame drops, glitches, or quality loss — ready for YouTube, Instagram, LinkedIn, or anywhere else.

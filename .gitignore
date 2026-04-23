@@ -37,6 +37,9 @@ build/
 *.mov
 *.webm
 
+# Banner / media assets (keep local, out of repo)
+assets/
+
 # Local testing
 test-bundles/
 test-renders/
