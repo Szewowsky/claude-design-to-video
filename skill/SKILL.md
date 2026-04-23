@@ -7,15 +7,15 @@ allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 
 # /claude-design-to-video
 
-**Platformy:** macOS (main-tested) + Linux (should work, community-tested). **Nie Windows** — skill używa bash/POSIX toolingu (`mktemp`, `trap`, `pkill`, `open`), którego native Windows PowerShell nie ogarnia. Dla Windows użyj WSL2.
+**Platformy:** macOS (główna platforma) + Linux (powinno działać, testowane przez społeczność). **Nie Windows** — skill używa POSIX tooling (`mktemp`, `trap`, `pkill`, `open`), którego natywny Windows PowerShell nie ogarnia. Dla Windows użyj WSL2.
 
-Claude Design eksportuje animacje jako standalone HTML (React + Babel + JSX scenes). Żeby zamienić to w MP4 bez drop frames i glitchy — używamy **timecut** (Puppeteer + wirtualny czas + ffmpeg). Nagrywanie real-time (Playwright/OBS) daje szajs — timecut "zamraża czas" w przeglądarce i renderuje klatka-po-klatce deterministycznie.
+Claude Design eksportuje animacje jako standalone HTML (React + Babel + JSX sceny). Żeby zamienić to w MP4 bez drop frames i glitchy — używamy **timecut** (Puppeteer + wirtualny czas + ffmpeg). Nagrywanie real-time (Playwright/OBS) daje szajs — timecut "zamraża czas" w przeglądarce i renderuje klatka-po-klatce deterministycznie.
 
-## ⚠️ Security note
+## ⚠️ Uwaga bezpieczeństwa
 
-Ten skill **wykonuje arbitralny JavaScript z bundle'a w lokalnym Chrome** i serwuje pliki na `localhost`. Renderuj tylko **zaufane eksporty z Claude Design** (własne lub od znanego source). Bundle od obcej osoby = arbitrary code execution na Twoim systemie.
+Ten skill **wykonuje arbitralny JavaScript z bundle'a w lokalnym Chrome** i serwuje pliki na `localhost`. Renderuj tylko **zaufane eksporty z Claude Design** (własne lub od znanego źródła). Bundle od obcej osoby = arbitrary code execution na Twoim systemie.
 
-## Input
+## Wejście
 
 **Folder z Claude Design eksportem** (standalone HTML export):
 ```
@@ -26,64 +26,105 @@ Ten skill **wykonuje arbitralny JavaScript z bundle'a w lokalnym Chrome** i serw
 └── assets/             # obrazki, fonty, pliki
 ```
 
-Default: `/claude-design-to-video` bez argumentu → autodetect w `~/Downloads/` (szuka folderu z HTML zawierającym **BOTH** `<Stage` AND `useTimeline`, plus walidacja że folder zawiera `animations.jsx` i `scenes/`).
+Domyślnie: `/claude-design-to-video` bez argumentu → autodetect w `~/Downloads/` (szuka folderu z HTML zawierającym **JEDNOCZEŚNIE** `<Stage` AND `useTimeline`, plus walidacja że folder zawiera `animations.jsx` i `scenes/`).
 
 Explicit: `/claude-design-to-video "~/Downloads/Animacja YouTube (1)"` [flagi]
 
 ## Flagi
 
-| flag | efekt | default |
+| flaga | efekt | domyślnie |
 |---|---|---|
 | `--hq` | CRF 18, preset slow (YouTube source grade) | ✓ on |
 | `--fast` | CRF 20, preset medium (iteracja, -30% czasu) | off |
-| `--preview N` | tylko N sekund zamiast pełnego duration (do szybkiego sprawdzenia) | off |
-| `--4k` | 3840×2160 (default 1920×1080) | off |
-| `--fps N` | frame rate (30 default — bo YT tak zapisuje i tak) | 30 |
+| `--preview N` | tylko N sekund zamiast pełnego duration (szybki podgląd) | off |
+| `--4k` | 3840×2160 (domyślnie 1920×1080) | off |
+| `--fps N` | frame rate (30 domyślnie — bo YT tak zapisuje i tak) | 30 |
 | `--duration N` | override parsed duration z HTML (wymagane gdy brak `DURATION = N` w HTMLu) | auto |
 | `--no-patch` | pomiń auto-patch CSS (gdy bundle już clean) | off |
 | `--in-place` | patchuj pliki w oryginalnym folderze zamiast kopii | off |
 | `--output PATH` | override output location | `~/Downloads/<slug>-<WxH>-<fps>-<mode>.mp4` |
 
-## Preflight (fail fast)
+## Preflight — auto-install brakujących zależności
 
-Sprawdź obecność:
-- `ffmpeg --version` (≥ 4)
-- Chrome/Chromium executable (auto-detect)
-- `node --version` (≥ 18)
-- `python3 --version` (≥ 3.8)
+Skill sam zaproponuje instalację brakujących narzędzi. **Zawsze pytaj usera przed uruchomieniem install (brew/apt)** — to destrukcyjna akcja modyfikująca system.
 
-**Chrome auto-detect** (pierwszy istniejący z listy):
+### Wykryj OS
+
+```bash
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  OS="macos"
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  OS="linux"
+else
+  fail "Nieobsługiwany system ($OSTYPE). Wymagany macOS lub Linux."
+fi
+```
+
+### Sprawdź + auto-install zależności
+
+Dla każdej brakującej zależności **poproś usera o zgodę**, potem install:
+
+| narzędzie | macOS (Homebrew) | Linux (apt/pacman) |
+|---|---|---|
+| `ffmpeg` | `brew install ffmpeg` | `sudo apt install ffmpeg` |
+| `node` (≥18) | `brew install node` | `sudo apt install nodejs npm` |
+| `python3` (≥3.8) | (wbudowane w macOS) | `sudo apt install python3` |
+| Chrome | `brew install --cask google-chrome` | `wget` z google.com + `sudo dpkg -i` |
+
+**Pseudokod auto-install:**
+```bash
+# macOS — najpierw sprawdź Homebrew
+if [ "$OS" = "macos" ] && ! command -v brew &>/dev/null; then
+  echo "⚠ Brak Homebrew. Wymagany do auto-install zależności."
+  echo "Install command: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+  # POPROŚ USERA O ZGODĘ — nie uruchamiaj automatycznie
+  fail "Zainstaluj Homebrew ręcznie, potem uruchom skill ponownie."
+fi
+
+# Każda zależność
+for dep in ffmpeg node python3; do
+  if ! command -v "$dep" &>/dev/null; then
+    echo "⚠ Brak $dep."
+    # POPROŚ USERA — propozycja instalacji:
+    #   macOS: "Zainstalować przez Homebrew? (brew install X)"
+    #   Linux: "Zainstalować przez apt? (sudo apt install X)"
+    # Czekaj na potwierdzenie. Po zgodzie — uruchom install command.
+  fi
+done
+```
+
+**WAŻNE dla Claude'a:** Nie odpalaj `brew install` / `sudo apt install` bez explicit zgody usera. Pokaż dokładną komendę która zostanie uruchomiona, czekaj na "tak/ok/odpal".
+
+### Chrome auto-detect (po install)
+
 ```bash
 CHROME_PATHS=(
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   # macOS
-  "/Applications/Chromium.app/Contents/MacOS/Chromium"             # macOS Chromium
-  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"   # macOS Brave
-  "/usr/bin/google-chrome"                                          # Linux Debian/Ubuntu
-  "/usr/bin/chromium-browser"                                       # Linux Ubuntu
-  "/usr/bin/chromium"                                               # Linux Arch
-  "/snap/bin/chromium"                                              # Linux Snap
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  "/Applications/Chromium.app/Contents/MacOS/Chromium"
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  "/usr/bin/google-chrome"
+  "/usr/bin/chromium-browser"
+  "/usr/bin/chromium"
+  "/snap/bin/chromium"
 )
 CHROME_BIN=""
 for p in "${CHROME_PATHS[@]}"; do
   [ -x "$p" ] && CHROME_BIN="$p" && break
 done
-[ -z "$CHROME_BIN" ] && fail "Nie znaleziono Chrome/Chromium. Zainstaluj: https://www.google.com/chrome/"
+[ -z "$CHROME_BIN" ] && fail "Nie znaleziono Chrome/Chromium. Zainstaluj: brew install --cask google-chrome (macOS) albo https://www.google.com/chrome/"
 ```
-
-Jak brak jakiejkolwiek zależności → komunikat co zainstalować i przerwij.
 
 ## Pipeline
 
 ### 1. Locate bundle (portable — bez GNU find)
 
-Jeśli arg podane — użyj. Inaczej autodetect via Python (BSD find na macOS nie ma `-maxdepth`):
+Jeśli arg podany — użyj. Inaczej autodetect via Python (BSD `find` na macOS nie ma `-maxdepth`):
 
 ```bash
 BUNDLE_PATH=$(python3 <<'PY'
 import os, sys
 root = os.path.expanduser('~/Downloads')
 for dirpath, dirs, files in os.walk(root):
-    # Max depth 3
     depth = dirpath[len(root):].count(os.sep)
     if depth >= 3:
         dirs[:] = []
@@ -97,9 +138,9 @@ for dirpath, dirs, files in os.walk(root):
                 content = fh.read()
         except OSError:
             continue
-        # REQUIRE BOTH markers (not OR) — reduces false positives
+        # Wymagamy OBYDWÓCH markerów (nie OR) — redukuje false positives
         if 'useTimeline' in content and '<Stage' in content:
-            # Validate sibling artifacts (animations.jsx + scenes/)
+            # Walidacja siblings (animations.jsx + scenes/)
             if os.path.isfile(os.path.join(dirpath, 'animations.jsx')) \
                and os.path.isdir(os.path.join(dirpath, 'scenes')):
                 print(dirpath)
@@ -110,7 +151,7 @@ PY
 [ -z "$BUNDLE_PATH" ] && fail "Nie znaleziono bundle w ~/Downloads. Podaj ścieżkę explicite: /claude-design-to-video <path>"
 ```
 
-### 2. Parse bundle metadata (tylko z wybranego HTML entry)
+### 2. Parse metadata (tylko z wybranego HTML entry)
 
 ```bash
 # Entry HTML — pierwszy .html w folderze (Claude Design zwykle generuje tylko jeden)
@@ -136,7 +177,7 @@ HEIGHT=${HEIGHT:-1080}
 [ "$FOURK" = "1" ] && WIDTH=3840 && HEIGHT=2160
 ```
 
-### 3. Setup workspace (dual: copy-to-temp vs in-place)
+### 3. Setup workspace (dual: kopia-do-temp vs in-place)
 
 **Oba tryby** instalują trap — cleanup zawsze działa.
 
@@ -155,20 +196,20 @@ fi
 cleanup() {
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" 2>/dev/null || true
   [ -n "$RENDER_PID" ] && kill "$RENDER_PID" 2>/dev/null || true
-  # Kill wszystkie dzieci tego shella (Chrome helpers itd.)
+  # Zabij wszystkie dzieci tego shella (Chrome helpers itd.)
   pkill -P $$ 2>/dev/null || true
   [ -n "$TMPDIR" ] && [ -d "$TMPDIR" ] && rm -rf "$TMPDIR"
 }
 trap cleanup EXIT INT TERM
 ```
 
-### 4. Auto-patch CSS bugs (skip z `--no-patch`)
+### 4. Auto-patch CSS bugów (skip z `--no-patch`)
 
-Claude Design eksport ma **znane** bugi które łamią frame-by-frame capture. timecut przechwytuje tylko JS time APIs (`requestAnimationFrame`, `setTimeout`, `Date.now`) — **nie CSS animations/transitions**. Wszystkie CSS-time rzeczy biegną wall-clock i psują render.
+Claude Design eksport ma **znane** bugi które łamią frame-by-frame capture. timecut przechwytuje tylko JS time APIs (`requestAnimationFrame`, `setTimeout`, `Date.now`) — **nie CSS animations/transitions**. Wszystko co CSS-time biegnie wall-clock i psuje render.
 
-**Policy:** fix silently, na koniec pokaż **raport co zmieniono** (user widzi diff bez interrupcji). Jeśli user nie zgadza się → odpal ponownie z `--no-patch` i patch ręcznie.
+**Policy:** patchuj silently, na końcu pokaż **raport co zmieniono** (user widzi diff bez przerwy). Jeśli user nie zgadza się → odpal ponownie z `--no-patch` i patch ręcznie.
 
-#### Patch A — Stage `PlaybackBar` visible w rendercie
+#### Patch A — Stage `PlaybackBar` widoczny w rendercie
 
 W `animations.jsx` Stage renderuje scrubber (play/pause, czas, track). Na screenshot widać jako pasek na dole.
 
@@ -192,10 +233,10 @@ Timecut dostaje URL z `?render=1`, scrubber znika, canvas wypełnia okno.
 
 #### Patch B — `@keyframes blink` → JS opacity
 
-**Wykryj (conservative — wymaga BOTH patterns w tym samym pliku):**
+**Wykryj (conservative — wymaga OBU wzorców w tym samym pliku):**
 1. Grep w JSX: `animation:\s*['"](\w+)\s+[\d.]+s\s+infinite['"]` → zbierz nazwy
 2. Dla każdej nazwy sprawdź czy w **tym samym pliku** istnieje `@keyframes <name>` (w `<style>` lub CSS)
-3. Patchuj **tylko wtedy** gdy oba są present
+3. Patchuj **tylko wtedy** gdy oba są obecne
 
 **Fix dla blink 1.2s z opacity 1→0.3:**
 
@@ -208,7 +249,7 @@ I usuń `<style>{`@keyframes blink ...`}</style>` blok.
 
 Uwaga: `time` musi być w scope (z `useTimeline()` lub `useTime()`). Sprawdź czy komponent już destrukturyzuje `time` — jeśli nie, dodaj.
 
-#### Patch C — `transition: opacity Nms` (webcam hidden windows fade)
+#### Patch C — `transition: opacity Nms` (webcam fade)
 
 **Wykryj:** `transition: ... opacity \d+ms cubic-bezier` w WebcamPip.jsx
 **Fix:** Zamień instant opacity + CSS transition na JS ease-out cubic:
@@ -245,58 +286,58 @@ I usuń `transition: '...opacity 500ms...'` (lub zamień na `transition: 'none'`
 +  const breathe = 1;
 ```
 
-#### Patch report
+#### Raport po patchach
 
 Po wszystkich patchach pokaż raport:
 ```
-✓ Auto-patch applied (4 changes):
-  - animations.jsx:467 — Patch A (PlaybackBar hidden w render mode)
+✓ Auto-patch zastosowany (4 zmiany):
+  - animations.jsx:467 — Patch A (PlaybackBar ukryty w render mode)
   - scenes/WebcamPip.jsx:193 — Patch B (blink → JS opacity)
   - scenes/WebcamPip.jsx:80 — Patch C (fade transition → JS ease-out)
-  - scenes/WebcamPip.jsx:83-84 — Patch D (sway/breathe disabled)
+  - scenes/WebcamPip.jsx:83-84 — Patch D (sway/breathe wyłączone)
 ```
 
-#### Patches E+ — nowe wzorce
+#### Patche E+ — nowe wzorce
 
-Jak Claude Design zmieni strukturę eksportu → rozszerz listę patches. Uruchom render bez patch'a, identyfikuj co się psuje, dodaj wzorzec tutaj.
+Jak Claude Design zmieni strukturę eksportu → rozszerz listę patches. Uruchom render bez patch'a, zidentyfikuj co się psuje, dodaj wzorzec.
 
-### 5. Install timecut (pinned version, cached)
+### 5. Instalacja timecut (pinned version, cached)
 
 ```bash
 CACHE="$HOME/.cache/claude-design-to-video"
 mkdir -p "$CACHE/timecut"
 TIMECUT_BIN="$CACHE/timecut/node_modules/.bin/timecut"
-# Pin version for reproducibility — supply-chain safety
+# Pin version dla reproducibility + supply-chain safety
 TIMECUT_VERSION="0.3.3"
 
 if [ ! -x "$TIMECUT_BIN" ]; then
-  echo "Installing timecut@$TIMECUT_VERSION (one-time, ~150MB)..."
+  echo "Instaluję timecut@$TIMECUT_VERSION (jednorazowo, ~150MB)..."
   (cd "$CACHE/timecut" && echo '{}' > package.json && npm install "timecut@$TIMECUT_VERSION") \
     || fail "npm install timecut@$TIMECUT_VERSION failed. Sprawdź internet, albo zainstaluj ręcznie: cd $CACHE/timecut && npm install timecut@$TIMECUT_VERSION"
 fi
 ```
 
-### 6. Start HTTP server (retry loop dla race-free port)
+### 6. Start HTTP serwera (retry loop dla race-free portu)
 
 ```bash
 HTML_ENC=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$HTML_FILE")
 
 for attempt in 1 2 3; do
-  # Pick free port
+  # Wybierz wolny port
   PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")
   cd "$WORK" && python3 -m http.server "$PORT" > /dev/null 2>&1 &
   HTTP_PID=$!
-  # Wait for server to actually respond (up to 3s)
+  # Poczekaj aż serwer odpowie (do 3s)
   for i in 1 2 3 4 5 6; do
     sleep 0.5
     if curl -sI "http://localhost:$PORT/$HTML_ENC" 2>/dev/null | grep -q "200 OK"; then
-      break 2  # success, exit both loops
+      break 2  # sukces, wyjdź z obu pętli
     fi
   done
-  # Failed this attempt, kill and retry
+  # Ta próba się nie udała, zabij i retry
   kill "$HTTP_PID" 2>/dev/null
   HTTP_PID=""
-  [ "$attempt" = "3" ] && fail "HTTP server nie wystartował po 3 próbach. Sprawdź czy port 49xxx nie jest blokowany."
+  [ "$attempt" = "3" ] && fail "HTTP serwer nie wystartował po 3 próbach. Sprawdź czy port 49xxx nie jest blokowany."
 done
 ```
 
@@ -313,7 +354,7 @@ tail -f /tmp/cdv.*/render.log 2>/dev/null | awk '/frame=/ {print}'
 SLUG=$(basename "$BUNDLE_PATH" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
 OUTPUT="${OUTPUT:-$HOME/Downloads/${SLUG}-${WIDTH}x${HEIGHT}-${FPS}-${MODE}.mp4}"
 
-# Quality mode → ffmpeg flags
+# Quality mode → flagi ffmpeg
 case "$MODE" in
   hq)   CRF=18; PRESET=slow ;;
   fast) CRF=20; PRESET=medium ;;
@@ -335,7 +376,7 @@ RENDER_PID=$!
 wait "$RENDER_PID"
 RENDER_EXIT=$?
 
-# Jak render się wywalił — usuń partial mp4
+# Jak render się wywalił — usuń częściowy mp4
 if [ "$RENDER_EXIT" -ne 0 ]; then
   rm -f "$OUTPUT"
   fail "timecut zakończył się błędem (exit $RENDER_EXIT). Sprawdź log: /tmp/cdv.*/render.log"
@@ -344,7 +385,7 @@ fi
 
 ### 8. Cleanup (automatyczny przez trap)
 
-`trap` z kroku 3 wykona się na:
+`trap` z kroku 3 wykona się przy:
 - normalnym zakończeniu (EXIT)
 - Ctrl+C (INT)
 - zabiciu (TERM)
@@ -371,10 +412,10 @@ EXPECTED_FRAMES=$((RENDER_DURATION * FPS))
 ACTUAL=$(ffprobe -v error -select_streams v:0 -show_entries stream=nb_frames -of csv=p=0 "$OUTPUT")
 if [ "$ACTUAL" != "$EXPECTED_FRAMES" ]; then
   echo "⚠ Frame mismatch: expected $EXPECTED_FRAMES, got $ACTUAL — render może być niekompletny"
-  echo "  (patrz sekcja Failure modes → 'Frame count mismatch')"
+  echo "  (patrz sekcja Tryby awarii → 'Frame count mismatch')"
 fi
 
-# Open w domyślnym playerze (macOS: QuickTime; Linux: xdg-open)
+# Otwórz w domyślnym playerze (macOS: QuickTime; Linux: xdg-open)
 if command -v open >/dev/null 2>&1; then
   open "$OUTPUT"         # macOS
 elif command -v xdg-open >/dev/null 2>&1; then
@@ -387,33 +428,33 @@ fi
 | rozdzielczość | mode | czas renderu |
 |---|---|---|
 | 1080p30 | `--fast` | ~10 min |
-| 1080p30 | `--hq` (default) | ~15 min |
+| 1080p30 | `--hq` (domyślnie) | ~15 min |
 | 1080p30 | `--preview 15` | ~1 min |
 | 4K30 | `--hq` | ~40-60 min |
 
 Powolność wynika z: Chrome renderuje pojedyncze klatki (szczególnie cięższe sceny typu Scene7_Features z flex expansion) + CRF 18 preset slow = wolniejszy encoding.
 
-## Failure modes (co może pójść źle)
+## Tryby awarii (co może pójść nie tak)
 
 | Symptom | Przyczyna | Reakcja |
 |---|---|---|
-| `HTTP server nie wystartował po 3 próbach` | Race na wolnym porcie, firewall, brak python3 | Sprawdź czy port 49xxx nie jest blokowany. Try `python3 -m http.server 49999` ręcznie. |
-| `TimeoutError: ... connect to the browser` | Chrome nie startuje (brak exec, za dużo instancji) | Sprawdź `$CHROME_BIN` (preflight auto-detect). Gdy user ma 20+ Chrome instancji otwartych — zapytaj o zamknięcie (`killall "Google Chrome"` na macOS / `pkill chromium` na Linux) przed retry. |
-| timecut exit ≠ 0, partial MP4 | Crash mid-render (Chrome memory leak, bug ffmpeg) | Trap `cleanup()` usuwa partial. Pokaż tail `/tmp/cdv.*/render.log`. Retry z `--fast` jak Chrome issue. |
+| `HTTP serwer nie wystartował po 3 próbach` | Race na wolnym porcie, firewall, brak python3 | Sprawdź czy port 49xxx nie jest blokowany. Spróbuj `python3 -m http.server 49999` ręcznie. |
+| `TimeoutError: ... connect to the browser` | Chrome nie startuje (brak exec, za dużo instancji) | Sprawdź `$CHROME_BIN` (preflight auto-detect). Gdy user ma 20+ instancji Chrome otwartych — zapytaj o zamknięcie (`killall "Google Chrome"` na macOS / `pkill chromium` na Linux) przed retry. |
+| timecut exit ≠ 0, częściowy MP4 | Crash mid-render (Chrome memory leak, bug ffmpeg) | Trap `cleanup()` usuwa częściowy. Pokaż tail `/tmp/cdv.*/render.log`. Retry z `--fast` jak Chrome issue. |
 | `npm install timecut@0.3.3 failed` | Offline / npm down | Jak cache `~/.cache/claude-design-to-video/timecut/node_modules/.bin/timecut` już istnieje → użyj (skip install). Jak nie i brak netu → fail z komunikatem. |
-| Render zwisa (brak log updateów 2+ min) | Chrome headless bug na konkretnej scenie | Kill timecut (trap się zajmie), retry z `--fast`. Jak znów — workaround: renderuj fragmenty przez `--preview N` z offsetami. |
+| Render zwisa (brak log updateów 2+ min) | Chrome headless bug na konkretnej scenie | Kill timecut (trap się zajmie), retry z `--fast`. Jak znowu — workaround: renderuj fragmenty przez `--preview N` z różnymi offsetami. |
 | Frame count mismatch w validation | Cichy drop klatek (timing issue) | Re-render z `--fast`. Jak się powtarza — prawdopodobnie bug w bundle (sprawdź nieznane CSS transitions, rozszerz Patch E+). |
 | `Nie znaleziono DURATION w HTML` | Bundle bez `DURATION = N` (nietypowy export) | Podaj `--duration N` explicite. |
 | `Nie znaleziono bundle w ~/Downloads` | Autodetect nie znalazł folderu z oboma markerami | Podaj ścieżkę explicite: `/claude-design-to-video "~/Downloads/<folder>"`. |
 
-## Known limitations
+## Znane ograniczenia
 
 - **CSS transitions z dynamic layout** (np. `transition: flex 600ms cubic-bezier`) nie są auto-patched — flex interpolation wymaga znania wymiarów, zbyt ryzykowne. Jeśli trafisz — ręczny port na JS `interpolate()`.
-- **Nowe patterns Claude Design** — co N miesięcy autor może zmienić eksport. Jak render wychodzi brudny → zidentyfikuj wzorzec + dodaj patch (sekcja 4).
+- **Nowe wzorce Claude Design** — co N miesięcy autor może zmienić eksport. Jak render wychodzi brudny → zidentyfikuj wzorzec + dodaj patch (sekcja 4).
 - **Intel Mac** — Puppeteer/Chrome wolniejszy (1.5-2×). M-chip zalecany.
 - **Windows** — nie wspierany natywnie. Użyj WSL2 (Linux distro wewnątrz Windows) — pełna zgodność.
 
-## Cache layout
+## Układ cache
 
 ```
 ~/.cache/claude-design-to-video/
@@ -435,7 +476,7 @@ Cache **zostaje między renderami** — reuse. Usuwaj tylko gdy chcesz wymusić 
 ## Przykłady
 
 ```bash
-# Default: autodetect, 1080p30, HQ, output do Downloads
+# Domyślnie: autodetect, 1080p30, HQ, output do Downloads
 /claude-design-to-video
 
 # Konkretny folder
@@ -464,4 +505,4 @@ Cache **zostaje między renderami** — reuse. Usuwaj tylko gdy chcesz wymusić 
 - **Remotion port** — bundle który ma za dużo CSS → auto-konwersja do Remotion project (skill `/claude-design-to-remotion`?)
 - **Batch mode** — renderuj N bundli równolegle
 - **Handoff URL support** — jak Anthropic zrobi publiczny endpoint, fetch bezpośrednio zamiast wymagać lokalnego folderu
-- **Windows native** — PowerShell + Chocolatey branch (niska priority — WSL2 rozwiązuje)
+- **Windows native** — PowerShell + Chocolatey branch (niski priorytet — WSL2 rozwiązuje)
